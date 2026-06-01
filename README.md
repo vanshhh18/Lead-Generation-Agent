@@ -1,250 +1,138 @@
-# Lead-Generation-Agent
+# n8n Lead Generation Automation
 
-<div align="center">
+An automated lead generation pipeline built with n8n that scrapes local businesses, scores them using AI, extracts contact info, and saves everything to Google Sheets — fully on autopilot.
 
-# ⚡ n8n Workflow Automation
-### Self-hosted, Dockerized & Production-Ready
+# How the Lead Generation Works
 
-![n8n](https://img.shields.io/badge/n8n-powered-FF6D5A?style=for-the-badge&logo=n8n&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-ready-2496ED?style=for-the-badge&logo=docker&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-database-336791?style=for-the-badge&logo=postgresql&logoColor=white)
-![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
+## Quick Overview
+You provide a **location and distance**, and this workflow automatically finds nearby businesses, scores them with AI, extracts their contact details (email, phone), and saves the best leads to Google Sheets.
 
-<br/>
+No manual searching. No copy-pasting. Just qualified leads delivered to a spreadsheet.
 
-> 🚀 A fully self-hosted **n8n** automation server running on Docker with PostgreSQL — built for reliability, easy to deploy, and simple to maintain.
+## The Full Flow
 
-<br/>
+```
+Input (Location + Distance)
+        ↓
+HTTP Node → Scrapes businesses from Overpass API
+        ↓
+Merge → Combines all results
+        ↓
+CODE Node → Extracts name, contact info, address, etc.
+        ↓
+LOOP → Processes each business one by one
+        ↓
+AI Agent → Scores each lead based on quality
+        ↓
+CODE Node → Converts LLM output to key-value pairs
+        ↓
+IF → Score high enough?
+    ├── False → Skip this lead
+    └── True → Check if contact info exists
+                    ↓
+               IF → Has website, phone, etc.?
+                    ├── False → Save basic info to Google Sheets
+                    └── True → Check if only website present
+                                    ↓
+                               IF → Has website only?
+                                    ├── True → HTTP Node scrapes the website
+                                    │             ↓
+                                    │          CODE → Extract email & phone
+                                    │             ↓
+                                    │          IF → Email/phone found?
+                                    │               ├── True → Save to Google Sheets
+                                    │               └── False → Skip
+                                    └── False → Save existing info to Google Sheets
+```
 
-[🚀 Quick Start](#-quick-start) • [⚙️ Configuration](#️-configuration) • [📦 Workflows](#-workflows) • [🛠️ Commands](#️-useful-commands) • [🤝 Contributing](#-contributing)
+## Step-by-Step Breakdown
 
----
+**Step 1 — Input**
+- You provide: `Location` (city, area, coordinates) and `Distance` (radius in meters/km)
+- This tells the workflow where to look for businesses
 
-</div>
+**Step 2 — Scrape Businesses**
+- HTTP Node calls the **Overpass API** (OpenStreetMap data)
+- Fetches all businesses within the given radius
+- Returns raw data with names, coordinates, tags
 
-## 📋 Table of Contents
+**Step 3 — Extract Details**
+- CODE node cleans up the raw data
+- Pulls out: business name, address, phone, website, category, etc.
+- Structures everything into a clean format
 
-- [About](#-about)
-- [Tech Stack](#-tech-stack)
-- [Prerequisites](#-prerequisites)
-- [Quick Start](#-quick-start)
-- [Configuration](#️-configuration)
-- [Project Structure](#-project-structure)
-- [Workflows](#-workflows)
-- [Useful Commands](#️-useful-commands)
-- [Troubleshooting](#-troubleshooting)
-- [Contributing](#-contributing)
+**Step 4 — Loop Through Each Business**
+- LOOP node processes businesses one at a time
+- Prevents API rate limits and keeps things organized
 
----
+**Step 5 — AI Lead Scoring**
+- AI Agent reads each business's details
+- Uses a specific prompt to score the lead (e.g. 0–10)
+- Based on completeness, relevance, potential value
+- CODE node converts the AI's response into a usable key-value format
 
-## 🧠 About
+**Step 6 — Score Filter (IF Node)**
+- Checks if the score is greater than a set threshold
+- Low score → skipped entirely
+- High score → moves to contact info check
 
-This repo contains everything you need to spin up a **self-hosted n8n instance** in minutes. n8n is a powerful open-source workflow automation tool — think Zapier or Make, but on your own server with full control over your data.
+**Step 7 — Contact Info Check (IF Node)**
+- Checks if the business already has phone, email, or website
+- If nothing found → saved with basic info only
+- If something found → deeper check begins
 
-With this setup you get:
-- ✅ **Persistent storage** using PostgreSQL
-- ✅ **Auto-restart** on failure or server reboot
-- ✅ **Webhook support** out of the box
-- ✅ **Version-controlled workflows** via exported JSON
-- ✅ **Easy environment-based configuration**
+**Step 8 — Website Scraping (IF Node)**
+- If only a website URL is present (no direct email/phone)
+- HTTP Node visits the website and scrapes it
+- CODE node tries to extract email and phone from the page
+- IF node checks if extraction was successful
+  - Found → saved to Google Sheets with full contact info
+  - Not found → skipped
 
----
+**Step 9 — Save to Google Sheets**
+- All qualified leads with contact info are saved
+- Each row = one business with name, address, phone, email, score, website
 
-## 🛠 Tech Stack
+## Use Cases
 
-| Tool | Purpose |
+**Sales Prospecting**
+- Find local businesses in any city or area
+- Get their contact info automatically
+- Focus your outreach on high-scored leads only
+
+**Agency Lead Gen**
+- Identify businesses with weak online presence
+- Target them with web design or marketing services
+- Scale prospecting across multiple locations
+
+**Market Research**
+- Map out all businesses in a category in a region
+- Understand density, contact availability, digital presence
+- Export clean data to sheets for analysis
+
+**Cold Outreach Campaigns**
+- Build a fresh leads list for any location in minutes
+- Enrich with emails and phone numbers automatically
+- Feed directly into your CRM or outreach tool
+
+## What Gets Saved to Google Sheets
+
+| Column | Description |
 |---|---|
-| [n8n](https://n8n.io) | Workflow automation engine |
-| [Docker](https://docker.com) | Containerization |
-| [Docker Compose](https://docs.docker.com/compose/) | Multi-container orchestration |
-| [PostgreSQL 15](https://postgresql.org) | Persistent database |
+| Business Name | Name of the business |
+| Address | Full street address |
+| Phone | Phone number (if found) |
+| Email | Email (scraped from website if needed) |
+| Website | Website URL |
+| AI Score | Lead quality score from AI Agent |
+| Category | Type of business |
 
----
+## Tech Stack
 
-## ✅ Prerequisites
-
-Make sure you have these installed:
-
-- [Docker](https://docs.docker.com/get-docker/) `v20+`
-- [Docker Compose](https://docs.docker.com/compose/install/) `v2+`
-
-```bash
-docker --version        # Docker version 20.x.x
-docker compose version  # Docker Compose version v2.x.x
-```
-
----
-
-## 🚀 Quick Start
-
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/yourusername/your-repo.git
-cd your-repo
-```
-
-### 2. Set up environment variables
-
-```bash
-cp .env.example .env
-```
-
-Open `.env` and fill in your values (see [Configuration](#️-configuration) below).
-
-### 3. Start the services
-
-```bash
-docker compose up -d
-```
-
-### 4. Open n8n in your browser
-
-```
-http://localhost:5678
-```
-
-Create your admin account on first launch and you're good to go! 🎉
-
----
-
-## ⚙️ Configuration
-
-Copy `.env.example` to `.env` and update the values:
-
-```env
-# ── n8n ────────────────────────────────────────
-N8N_HOST=localhost
-N8N_PORT=5678
-N8N_PROTOCOL=http
-WEBHOOK_URL=http://localhost:5678/
-TIMEZONE=Asia/Kolkata
-
-# ── PostgreSQL ─────────────────────────────────
-POSTGRES_USER=n8n
-POSTGRES_PASSWORD=your_strong_password_here
-POSTGRES_DB=n8n
-```
-
-### Environment Variables Reference
-
-| Variable | Description | Example |
-|---|---|---|
-| `N8N_HOST` | Hostname where n8n runs | `localhost` or `n8n.yourdomain.com` |
-| `N8N_PORT` | Port to expose n8n on | `5678` |
-| `N8N_PROTOCOL` | `http` or `https` | `http` |
-| `WEBHOOK_URL` | Public URL for incoming webhooks | `https://n8n.yourdomain.com/` |
-| `TIMEZONE` | Your local timezone | `Asia/Kolkata` |
-| `POSTGRES_USER` | PostgreSQL username | `n8n` |
-| `POSTGRES_PASSWORD` | PostgreSQL password | `supersecret` |
-| `POSTGRES_DB` | PostgreSQL database name | `n8n` |
-
-> ⚠️ **Never commit your `.env` file.** It's already in `.gitignore`.
-
----
-
-## 📁 Project Structure
-
-```
-├── docker-compose.yml      # Docker services definition
-├── .env                    # Your local secrets (git-ignored)
-├── .env.example            # Template for environment variables
-├── .gitignore              # Ignores .env, data volumes, etc.
-├── workflows/              # Exported n8n workflow JSON files
-│   └── example-workflow.json
-└── README.md
-```
-
----
-
-## 📦 Workflows
-
-All workflows are exported as JSON files inside the `/workflows` folder for version control.
-
-### Importing a workflow
-
-1. Open n8n → click **"+"** → **"Import from file"**
-2. Select any `.json` file from the `/workflows` folder
-
-### Exporting your workflows
-
-**From the UI:**
-- Open a workflow → top-right menu → **Download**
-
-**From the CLI:**
-```bash
-docker compose exec n8n n8n export:workflow --all --output=/home/node/.n8n/workflows/
-```
-
-### Using n8n's built-in Git integration *(v1.x+)*
-
-Go to **Settings → Source Control** to connect n8n directly to this repo and push/pull workflows without manual exports.
-
----
-
-## 🛠️ Useful Commands
-
-```bash
-# Start all services (detached)
-docker compose up -d
-
-# Stop all services
-docker compose down
-
-# View live logs
-docker compose logs -f n8n
-
-# Restart n8n only
-docker compose restart n8n
-
-# Pull latest n8n image
-docker compose pull && docker compose up -d
-
-# Access n8n container shell
-docker compose exec n8n sh
-```
-
----
-
-## 🔧 Troubleshooting
-
-**n8n not starting?**
-```bash
-docker compose logs n8n
-```
-
-**Can't connect to database?**
-- Make sure `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` in `.env` match what's in `docker-compose.yml`
-- Wait a few seconds — PostgreSQL takes a moment to initialize on first run
-
-**Webhooks not working?**
-- Make sure `WEBHOOK_URL` is set to your **publicly accessible URL** (not `localhost`) if you're receiving webhooks from external services
-
-**Port already in use?**
-- Change `N8N_PORT` in `.env` and update the port mapping in `docker-compose.yml`
-
----
-
-## 🤝 Contributing
-
-1. Fork the repo
-2. Create a feature branch: `git checkout -b feature/my-workflow`
-3. Export and add your workflow JSON to `/workflows`
-4. Commit: `git commit -m "Add: my awesome workflow"`
-5. Push & open a Pull Request
-
----
-
-## 📄 License
-
-This project is licensed under the [MIT License](LICENSE).
-
----
-
-<div align="center">
-
-Made with ❤️ and automated with **n8n**
-
-⭐ Star this repo if it helped you!
-
-</div>
+- **Automation**: n8n — visual workflow engine
+- **Data Source**: Overpass API (OpenStreetMap) — free business data
+- **AI Scoring**: AI Agent node (LLM) — scores lead quality
+- **Web Scraping**: HTTP Node — fetches website content
+- **Data Output**: Google Sheets — stores all qualified leads
+- **Logic**: IF nodes — routes leads based on score and data availability
+- **Processing**: CODE nodes — cleans, transforms, and extracts data
