@@ -1,0 +1,1097 @@
+{
+  "name": "Lead-Gen-Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -2064,
+        448
+      ],
+      "id": "eb178839-dce4-44e9-8f21-ddd620bed203",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://overpass-api.de/api/interpreter",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "n8n-crm-bot/1.0"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "data",
+              "value": "[out:json][timeout:60];\n(\n  node[\"amenity\"~\"clinic|doctors|dentist\"][\"email\"](around:96560,40.0583,-74.4057);\n  way[\"amenity\"~\"clinic|doctors|dentist\"][\"email\"](around:96560,40.0583,-74.4057);\n  relation[\"amenity\"~\"clinic|doctors|dentist\"][\"email\"](around:96560,40.0583,-74.4057);\n);\nout body 50;"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1712,
+        416
+      ],
+      "id": "9648eb10-add9-4db1-888d-6ff5a18b0ae3",
+      "name": "HTTP Request1",
+      "retryOnFail": true,
+      "maxTries": 4,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Fetch input items from n8n context\nconst items = $input.all();\nconst seen = new Set();\nconst results = [];\n\n// 2. Process and deduplicate elements\nfor (const item of items) {\n  const elements = item.json.elements || [];\n  \n  for (const el of elements) {\n    // Deduplicate by OSM id\n    if (seen.has(el.id)) continue;\n    seen.add(el.id);\n\n    results.push({\n      json: {\n        osm_id:    el.id,\n        name:      el.tags?.name || '',\n        website:   el.tags?.website || el.tags?.['contact:website'] || '',\n        phone:     el.tags?.phone || el.tags?.['contact:phone'] || '',\n        email:     el.tags?.email || el.tags?.['contact:email'] || '',\n        address:   [\n                     el.tags?.['addr:housenumber'],\n                     el.tags?.['addr:street'],\n                     el.tags?.['addr:city'],\n                     el.tags?.['addr:state'],\n                     el.tags?.['addr:postcode']\n                   ].filter(Boolean).join(', '),\n        type:      el.tags?.office || el.tags?.shop || el.tags?.amenity || el.tags?.craft || el.tags?.leisure || '',\n        lat:       el.lat || el.center?.lat || '',\n        lon:       el.lon || el.center?.lon || '',\n      }\n    });\n  }\n}\n\n// 3. Fisher-Yates Shuffle Algorithm to randomly mix the combined results\nfor (let i = results.length - 1; i > 0; i--) {\n  const j = Math.floor(Math.random() * (i + 1));\n  [results[i], results[j]] = [results[j], results[i]];\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1120,
+        432
+      ],
+      "id": "8c82e080-b3b2-41a7-acf0-b2337cd6b118",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a high-tier Lead Qualification Engine for a B2B Accounting and CPA firm. Your sole task is to analyze incoming business lead data and determine how desperately they need outsourced accounting, tax compliance, or fractional CFO services.\n\n[INPUT DATA]\n- Name: {{ $json.name || \"MISSING\" }}\n- Type: {{ $json.type || \"MISSING\" }}\n- Address: {{ $json.full_address || \"MISSING\" }}\n- Website: {{ $json.website || \"MISSING\" }}\n- Email: {{ $json.email || \"MISSING\" }}\n- Phone: {{ $json.phone || \"MISSING\" }}\n\n[QUALIFICATION & SCORING LOGIC]\n\n1. DATA completeness (\"info\")\n   INFO ASSESSMENT:\n   - Set \"info\": true ONLY if ALL THREE of [Website, Email, Phone] do not equal \"MISSING\".\n   - If any one or more of those three is \"MISSING\", you must set \"info\": false.\n\n2. ACCOUNTING NEED COMPLEXITY (Base Score: 1 to 10)\n   Assign a base score based strictly on how chaotic or regulated that business type's finances inherently are:\n   \n   - CRITICAL NEED (Base Score 8–10): Construction, Builders, Logistics, Law Firms, Freight, Supply Chain, Manufacturing. (Reasons: Job costing, progress billing, complex inventory, multi-state tax nexus, subcontractors).\n   - HIGH NEED (Base Score 7–8): Clinics, Medical Practices, Marketing/IT Agencies, Dentists, Architect, E-commerce hubs. (Reasons: High revenue, complex payroll/commissions, cross-border sales tax, high equipment depreciation, owners who hate admin work).\n   - MEDIUM NEED (Base Score 5–6): Restaurants, Cafes, Retail Stores, Salons, Gyms. (Reasons: Standard bookkeeping, localized tax, straightforward expenses, but prone to messy day-to-day tracking).\n   - LOW NEED (Base Score 1–4): Solo practitioners, freelancers, independent consultants, or highly vague business entities. (Too small to afford professional firm retainers).\n\n3. SCORE MODIFIERS\n\n   - CRITICAL CONDITION: If Address equals \"MISSING\", you must bypass all other scoring logic and assign a final score of exactly 1.\n   - Add +1 point if the company name or type implies multiple locations, warehousing, or franchise operations (adds massive tax/payroll complexity).\n   - Subtract -1 point if the entity appears to be a microscopic micro-business or local mom-and-pop shop with low transaction velocity.\n   - Constrain the final score strictly between 1 and 10.\n\n\n[OUTPUT FORMATTING]\nReturn ONLY a valid raw JSON object. Do not wrap the JSON object inside markdown code block backticks (```json). Do not include introductory text, explanations, notes, or concluding prose. Every character outside the curly braces of the JSON block is strictly forbidden.\n\n{\n  \"score\": <integer between 1 and 10>,\n  \"reason\": \"<string, maximum 20 words explaining the final score choice>\",\n  \"info\": <true or false>,\n  \"website\": \"<string value of URL or the word MISSING>\"\n}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        -448,
+        304
+      ],
+      "id": "de05263d-079e-47a2-b591-d3778791fcb5",
+      "name": "AI Agent",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "let text = $json.output || $json.text || $json.message || \"\";\n\n// convert escaped newlines into real text\ntext = text.replace(/\\\\n/g, \"\\n\");\n\n// remove markdown wrappers\ntext = text\n  .replace(/```json/g, \"\")\n  .replace(/```/g, \"\")\n  .trim();\n\ntry {\n  const parsed = JSON.parse(text);\n\n  return [\n    {\n      json: parsed\n    }\n  ];\n} catch (err) {\n  // Safe qualification defaults matching the clean scoring prompt\n  return [\n    {\n      json: {\n        score: 0,\n        keep: false,\n        reason: \"Parse failed\",\n        raw: text\n      }\n    }\n  ];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -96,
+        304
+      ],
+      "id": "ad153869-2e03-442d-8ba1-f4d816576f4e",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "bc61f311-a851-46bf-8f5f-9b330e9078d8",
+              "leftValue": "={{ $json.score }}",
+              "rightValue": 5,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        128,
+        304
+      ],
+      "id": "ce9c18f4-2178-4955-8949-1c266327f4ca",
+      "name": "If",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -896,
+        432
+      ],
+      "id": "bb980f96-b3b5-4110-9ee2-bf9cc4e766b6",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "amount": 6
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -672,
+        304
+      ],
+      "id": "5e5e6dc2-655d-4f28-bbae-61d68caa6121",
+      "name": "Wait",
+      "webhookId": "e69b0bee-9d86-476d-8221-0f17fa50e541"
+    },
+    {
+      "parameters": {
+        "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        -368,
+        528
+      ],
+      "id": "7045ccb2-ef9d-41ef-8b93-91554588b6a8",
+      "name": "Groq Chat Model",
+      "credentials": {
+        "groqApi": {
+          "id": "8774opspENjfUdR2",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "numberInputs": 5
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        2384,
+        352
+      ],
+      "id": "8dff5fb6-ad18-4baa-90e4-f47d89aa7b11",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "71056cf1-4037-4748-8b07-ef455d921a40",
+              "leftValue": "={{ $json.info }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        320,
+        208
+      ],
+      "id": "2ff3cdcc-9898-4110-b977-e5ffa2725863",
+      "name": "If2"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1u5f1t6K0FEGR9b1x7uqXuqC8WGhkoggQRQIGEAs4UWg",
+          "mode": "list",
+          "cachedResultName": "Lead Generation (Vansh)- LS Properties x Upnex",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1u5f1t6K0FEGR9b1x7uqXuqC8WGhkoggQRQIGEAs4UWg/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Lead generation",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1u5f1t6K0FEGR9b1x7uqXuqC8WGhkoggQRQIGEAs4UWg/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Company_name": "={{ $('Code in JavaScript').item.json.name }}",
+            "Type": "={{ $('Code in JavaScript').item.json.type }}",
+            "Address": "={{ $('Code in JavaScript').item.json.address }}",
+            "Score": "={{ $('Code in JavaScript1').item.json.score }}",
+            "Reason": "={{ $('Code in JavaScript1').item.json.reason }}",
+            "Website": "={{ $('Code in JavaScript1').item.json.website }}",
+            "Phone": "='{{ $('Code in JavaScript').item.json.phone }}",
+            "Email": "={{ $('Code in JavaScript').item.json.email }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Company_name",
+              "displayName": "Company_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Type",
+              "displayName": "Type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Address",
+              "displayName": "Address",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Score",
+              "displayName": "Score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Reason",
+              "displayName": "Reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Website",
+              "displayName": "Website",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Phone",
+              "displayName": "Phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1344,
+        -96
+      ],
+      "id": "331acfdb-d019-4c51-9755-a66310028870",
+      "name": "Append row in sheet",
+      "retryOnFail": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "pgGDS6IMQPcYZ5JH",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "14727732-9234-4891-8b96-8d1662e889c4",
+              "leftValue": "={{ $json.website }}",
+              "rightValue": "http",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        768,
+        272
+      ],
+      "id": "24f1c74e-45d3-43af-ae25-0e36a3ec77f9",
+      "name": "If1"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.scraperapi.com/",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "api_key",
+              "value": "8cb3a81f559d8276e1bb158cfb18a67c"
+            },
+            {
+              "name": "url",
+              "value": "={{ $json.website }}"
+            },
+            {
+              "name": "render",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1008,
+        176
+      ],
+      "id": "a409c261-747f-440d-b423-65ef44d99414",
+      "name": "HTTP Request2",
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Pull the fully rendered HTML source text from ScraperAPI's payload structure\nconst html = $json.data || $json.body || \"\";\n\n// 2. Extract Emails\nconst emails = html.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}/g) || [];\n\n// 3. Clean, validate, and filter out fake asset/image emails\nconst imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.pdf'];\nconst cleanEmails = emails\n  .map(e => e.toLowerCase().trim())\n  .filter(e => !imageExtensions.some(ext => e.endsWith(ext))); // Drops files disguised as emails\n\n// Prioritize the best generic inbox prefixes if multiple exist\nconst validEmail =\n  cleanEmails.find(e => e.startsWith(\"info@\")) ||\n  cleanEmails.find(e => e.startsWith(\"contact@\")) ||\n  cleanEmails.find(e => e.startsWith(\"hello@\")) ||\n  cleanEmails[0] || \n  \"\";\n\n// 4. Extract Phone Numbers\nconst telLinkRegex = /href=\"tel:\\+?([\\d-]{7,15})\"/g;\nconst standardPhoneRegex = /(?:\\+?\\d{1,3}[\\s.-]?)?\\(?\\d{3}\\)?[\\s.-]?\\d{3}[\\s.-]?\\d{4}/g;\n\nlet foundPhones = [];\nlet match;\n\n// Pass 1: Pull from HTML anchor links (href=\"tel:...\")\nwhile ((match = telLinkRegex.exec(html)) !== null) {\n    if (match[1]) foundPhones.push(match[1]);\n}\n\n// Pass 2: Pull standard formatting directly out of page text\nconst textMatches = html.match(standardPhoneRegex) || [];\nfoundPhones = foundPhones.concat(textMatches);\n\n// Clean up formatting artifacts, spaces, and short junk system numbers\nlet cleanPhones = foundPhones\n  .map(p => p.replace(/[^\\d+]/g, \"\")) // Strips characters, keeping only digits and +\n  .filter(p => p.length >= 10); // Ensures it's a real telephone string length\n\n// Reformat target output phone into a standardized string (e.g. +17322288383)\nlet validPhone = cleanPhones[0] || \"\";\nif (validPhone && !validPhone.startsWith(\"+\")) {\n    validPhone = validPhone.length === 10 ? \"+1\" + validPhone : \"+\" + validPhone;\n}\n\n// 5. Output clean data object properties straight to downstream nodes\nreturn {\n  email: validEmail,\n  phone: validPhone\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1184,
+        176
+      ],
+      "id": "3c86fe90-52fe-438e-afa4-4d34c38ceb0f",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "f5e05d1b-7413-4f2e-8a6f-3d1c3360f1ed",
+              "leftValue": "={{ $json.email }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "a48a5004-95a5-4c13-b26a-8af6bc2b8dee",
+              "leftValue": "={{ $json.phone }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1408,
+        176
+      ],
+      "id": "2d9a32d2-8c68-4e1c-94a9-195fd6f2128f",
+      "name": "If3"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1u5f1t6K0FEGR9b1x7uqXuqC8WGhkoggQRQIGEAs4UWg",
+          "mode": "list",
+          "cachedResultName": "Lead Generation (Vansh)- LS Properties x Upnex",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1u5f1t6K0FEGR9b1x7uqXuqC8WGhkoggQRQIGEAs4UWg/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Lead generation",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1u5f1t6K0FEGR9b1x7uqXuqC8WGhkoggQRQIGEAs4UWg/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Company_name": "={{ $('Code in JavaScript').item.json.name }}",
+            "Type": "={{ $('Code in JavaScript').item.json.type }}",
+            "Address": "={{ $('Code in JavaScript').item.json.address }}",
+            "Score": "={{ $('Code in JavaScript1').item.json.score }}",
+            "Reason": "={{ $('Code in JavaScript1').item.json.reason }}",
+            "Website": "={{ $('Code in JavaScript1').item.json.website }}",
+            "Phone": "='{{ $('Code in JavaScript2').item.json.phone }}",
+            "Email": "={{ $('Code in JavaScript2').item.json.email }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Company_name",
+              "displayName": "Company_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Type",
+              "displayName": "Type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Address",
+              "displayName": "Address",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Score",
+              "displayName": "Score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Reason",
+              "displayName": "Reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Website",
+              "displayName": "Website",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Phone",
+              "displayName": "Phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1632,
+        128
+      ],
+      "id": "e974ea9c-0327-4135-bb08-0b5ddfc06c28",
+      "name": "Append row in sheet1",
+      "retryOnFail": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "pgGDS6IMQPcYZ5JH",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://overpass-api.de/api/interpreter",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "n8n-crm-bot/1.0"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "data",
+              "value": "[out:json][timeout:60];\n(\n  node[\"office\"~\"lawyer|legal\"][\"email\"](around:96560,40.0583,-74.4057);\n  way[\"office\"~\"lawyer|legal\"][\"email\"](around:96560,40.0583,-74.4057);\n  relation[\"office\"~\"lawyer|legal\"][\"email\"](around:96560,40.0583,-74.4057);\n);\nout body 50;"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1712,
+        224
+      ],
+      "id": "0031ec4c-4512-4910-897a-6f399838fff9",
+      "name": "HTTP Request",
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://overpass-api.de/api/interpreter",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "n8n-crm-bot/1.0"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "data",
+              "value": "[out:json][timeout:90];\n(\n\n  node[\"craft\"~\"builder\"][\"email\"](around:96560,40.0583,-74.4057);\n  way[\"craft\"~\"builder\"][\"email\"](around:96560,40.0583,-74.4057);\n  relation[\"craft\"~\"builder\"][\"email\"](around:96560,40.0583,-74.4057);\n\n  node[\"office\"=\"company\"][\"company\"=\"construction\"][\"email\"](around:96560,40.0583,-74.4057);\n  way[\"office\"=\"company\"][\"company\"=\"construction\"][\"email\"](around:96560,40.0583,-74.4057);\n  relation[\"office\"=\"company\"][\"company\"=\"construction\"][\"email\"](around:96560,40.0583,-74.4057);\n\n  \n  node[\"office\"~\"it|technology\"][\"email\"](around:96560,40.0583,-74.4057);\n  way[\"office\"~\"it|technology\"][\"email\"](around:96560,40.0583,-74.4057);\n  relation[\"office\"~\"it|technology\"][\"email\"](around:96560,40.0583,-74.4057);\n\n  \n  node[\"office\"=\"estate_agent\"][\"email\"](around:96560,40.0583,-74.4057);\n  way[\"office\"=\"estate_agent\"][\"email\"](around:96560,40.0583,-74.4057);\n  relation[\"office\"=\"estate_agent\"][\"email\"](around:96560,40.0583,-74.4057);\n\n  \n  node[\"office\"=\"logistics\"][\"email\"](around:96560,40.0583,-74.4057);\n  way[\"office\"=\"logistics\"][\"email\"](around:96560,40.0583,-74.4057);\n  relation[\"office\"=\"logistics\"][\"email\"](around:96560,40.0583,-74.4057);\n\n  node[\"industrial\"=\"logistics\"][\"email\"](around:96560,40.0583,-74.4057);\n  way[\"industrial\"=\"logistics\"][\"email\"](around:96560,40.0583,-74.4057);\n  relation[\"industrial\"=\"logistics\"][\"email\"](around:96560,40.0583,-74.4057);\n);\nout body 100;"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1712,
+        608
+      ],
+      "id": "dc92de86-21c0-4175-9fa3-fbb1c730bfdb",
+      "name": "HTTP Request3",
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://overpass-api.de/api/interpreter",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "n8n-crm-bot/1.0"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "data",
+              "value": "[out:json][timeout:90];\n(\n \n  node[\"office\"~\"financial|financial_advisor\"][\"email\"](around:96560,40.0583,-74.4057);\n  way[\"office\"~\"financial|financial_advisor\"][\"email\"](around:96560,40.0583,-74.4057);\n  relation[\"office\"~\"financial|financial_advisor\"][\"email\"](around:96560,40.0583,-74.4057);\n\n \n  node[\"office\"~\"accountant|tax_advisor\"][\"email\"](around:96560,40.0583,-74.4057);\n  way[\"office\"~\"accountant|tax_advisor\"][\"email\"](around:96560,40.0583,-74.4057);\n  relation[\"office\"~\"accountant|tax_advisor\"][\"email\"](around:96560,40.0583,-74.4057);\n\n\n  node[\"office\"=\"insurance\"][\"email\"](around:96560,40.0583,-74.4057);\n  way[\"office\"=\"insurance\"][\"email\"](around:96560,40.0583,-74.4057);\n  relation[\"office\"=\"insurance\"][\"email\"](around:96560,40.0583,-74.4057);\n);\nout body 100;"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1712,
+        800
+      ],
+      "id": "b48e7233-f437-40c6-bd3e-d64a2e30185d",
+      "name": "HTTP Request4",
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "numberInputs": 5
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -1392,
+        400
+      ],
+      "id": "d7dfe40c-c062-4034-9a8f-7deebc750abd",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://overpass-api.de/api/interpreter",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "n8n-crm-bot/1.0"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "data",
+              "value": "[out:json][timeout:180];\n(\n \n  node[\"craft\"~\"builder\"][!email][!\"contact:email\"](around:96560,40.0583,-74.4057);\n  way[\"craft\"~\"builder\"][!email][!\"contact:email\"](around:96560,40.0583,-74.4057);\n  relation[\"craft\"~\"builder\"][!email][!\"contact:email\"](around:96560,40.0583,-74.4057);\n\n  node[\"office\"=\"company\"][\"company\"=\"construction\"][!email][!\"contact:email\"](around:96560,40.0583,-74.4057);\n  way[\"office\"=\"company\"][\"company\"=\"construction\"][!email][!\"contact:email\"](around:96560,40.0583,-74.4057);\n  relation[\"office\"=\"company\"][\"company\"=\"construction\"][!email][!\"contact:email\"](around:96560,40.0583,-74.4057);\n\n  \n  node[\"office\"~\"it|technology\"][!email][!\"contact:email\"](around:96560,40.0583,-74.4057);\n  way[\"office\"~\"it|technology\"][!email][!\"contact:email\"](around:96560,40.0583,-74.4057);\n  relation[\"office\"~\"it|technology\"][!email][!\"contact:email\"](around:96560,40.0583,-74.4057);\n\n\n  node[\"office\"=\"estate_agent\"][!email][!\"contact:email\"](around:96560,40.0583,-74.4057);\n  way[\"office\"=\"estate_agent\"][!email][!\"contact:email\"](around:96560,40.0583,-74.4057);\n  relation[\"office\"=\"estate_agent\"][!email][!\"contact:email\"](around:96560,40.0583,-74.4057);\n\n \n  node[\"office\"=\"logistics\"][!email][!\"contact:email\"](around:96560,40.0583,-74.4057);\n  way[\"office\"=\"logistics\"][!email][!\"contact:email\"](around:96560,40.0583,-74.4057);\n  relation[\"office\"=\"logistics\"][!email][!\"contact:email\"](around:96560,40.0583,-74.4057);\n\n  node[\"industrial\"=\"logistics\"][!email][!\"contact:email\"](around:96560,40.0583,-74.4057);\n  way[\"industrial\"=\"logistics\"][!email][!\"contact:email\"](around:96560,40.0583,-74.4057);\n  relation[\"industrial\"=\"logistics\"][!email][!\"contact:email\"](around:96560,40.0583,-74.4057);\n\n\n  node[\"office\"~\"financial|financial_advisor\"][!email][!\"contact:email\"](around:96560,40.0583,-74.4057);\n  way[\"office\"~\"financial|financial_advisor\"][!email][!\"contact:email\"](around:96560,40.0583,-74.4057);\n  relation[\"office\"~\"financial|financial_advisor\"][!email][!\"contact:email\"](around:96560,40.0583,-74.4057);\n\n  node[\"office\"~\"accountant|tax_advisor\"][!email][!\"contact:email\"](around:96560,40.0583,-74.4057);\n  way[\"office\"~\"accountant|tax_advisor\"][!email][!\"contact:email\"](around:96560,40.0583,-74.4057);\n  relation[\"office\"~\"accountant|tax_advisor\"][!email][!\"contact:email\"](around:96560,40.0583,-74.4057);\n\n  node[\"office\"=\"insurance\"][!email][!\"contact:email\"](around:96560,40.0583,-74.4057);\n  way[\"office\"=\"insurance\"][!email][!\"contact:email\"](around:96560,40.0583,-74.4057);\n  relation[\"office\"=\"insurance\"][!email][!\"contact:email\"](around:96560,40.0583,-74.4057);\n\n\n);\nout body 50;"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1712,
+        1008
+      ],
+      "id": "30d08e83-626d-4ebc-9fab-376785ebad37",
+      "name": "HTTP Request5",
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "content": "    Business Extraction",
+        "height": 80,
+        "width": 230,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1776,
+        128
+      ],
+      "typeVersion": 1,
+      "id": "836689b9-4819-405e-946a-a9e096244b43",
+      "name": "Sticky Note"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP Request3",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP Request4",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP Request5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "If2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If2": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row in sheet": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "HTTP Request2": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "If3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If3": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Append row in sheet1": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request3": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "HTTP Request4": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "HTTP Request5": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "13d9793c-8480-483d-9698-fbfb4610810e",
+  "meta": {
+    "instanceId": "7eb873b815d333329fbacc405db4e21b35a34be844a925cf90d4bb4d229a8aa7"
+  },
+  "id": "VIeDeagxXLrtfNVv",
+  "tags": []
+}
