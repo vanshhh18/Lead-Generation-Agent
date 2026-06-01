@@ -397,7 +397,7 @@
           "parameters": [
             {
               "name": "api_key",
-              "value": "8cb3a81f559d8276e1bb158cfb18a67c"
+              "value": "api_key"
             },
             {
               "name": "url",
